@@ -32,6 +32,9 @@ namespace NzbDrone.Core.Download.Clients.QBittorrent
         private readonly ICached<Dictionary<string, string>> _authCookieCache;
         private readonly ICached<int> _apiVersionCache;
 
+        // setLabel changed to setCategory with api version 9
+        private static readonly int API_VERSION_CATEGORY = 9;
+
         public QBittorrentProxy(IHttpClient httpClient, ICacheManager cacheManager, Logger logger)
         {
             _httpClient = httpClient;
@@ -68,9 +71,10 @@ namespace NzbDrone.Core.Download.Clients.QBittorrent
 
         public List<QBittorrentTorrent> GetTorrents(QBittorrentSettings settings)
         {
+            var labelParam = GetCachedVersion(settings) >= API_VERSION_CATEGORY ? "category" : "label";
+
             var request = BuildRequest(settings).Resource("/query/torrents")
-                                                .AddQueryParam("label", settings.TvCategory)
-                                                .AddQueryParam("category", settings.TvCategory);
+                                                .AddQueryParam(labelParam, settings.TvCategory);
 
             var response = ProcessRequest<List<QBittorrentTorrent>>(request, settings);
 
@@ -106,26 +110,16 @@ namespace NzbDrone.Core.Download.Clients.QBittorrent
 
         public void SetTorrentLabel(string hash, string label, QBittorrentSettings settings)
         {
-            var setCategoryRequest = BuildRequest(settings).Resource("/command/setCategory")
-                                                        .Post()
-                                                        .AddFormParameter("hashes", hash)
-                                                        .AddFormParameter("category", label);
-            try
-            {
-                ProcessRequest<object>(setCategoryRequest, settings);
-            }
-            catch(DownloadClientException ex)
-            {
-                // if setCategory fails due to method not being found, then try older setLabel command for qbittorent < v.3.3.5
-                if (ex.InnerException is HttpException && (ex.InnerException as HttpException).Response.StatusCode == HttpStatusCode.NotFound)
-                {
-                    var setLabelRequest = BuildRequest(settings).Resource("/command/setLabel")
-                                                                .Post()
-                                                                .AddFormParameter("hashes", hash)
-                                                                .AddFormParameter("label", label);
-                    ProcessRequest<object>(setLabelRequest, settings);
-                }
-            }
+            var useCategory = GetCachedVersion(settings) >= API_VERSION_CATEGORY;
+            var labelCommand = useCategory ? "/command/setCategory" : "/command/setLabel";
+            var labelParam = useCategory ? "category" : "label";
+
+            var request = BuildRequest(settings).Resource(labelCommand)
+                                                .Post()
+                                                .AddFormParameter("hashes", hash)
+                                                .AddFormParameter(labelParam, label);
+
+            ProcessRequest<object>(request, settings);
         }
 
         public void MoveTorrentToTopInQueue(string hash, QBittorrentSettings settings)
