@@ -30,6 +30,7 @@ namespace NzbDrone.Core.Download.Clients.QBittorrent
         private readonly IHttpClient _httpClient;
         private readonly Logger _logger;
         private readonly ICached<Dictionary<string, string>> _authCookieCache;
+        private readonly ICached<int> _apiVersionCache;
 
         public QBittorrentProxy(IHttpClient httpClient, ICacheManager cacheManager, Logger logger)
         {
@@ -37,6 +38,7 @@ namespace NzbDrone.Core.Download.Clients.QBittorrent
             _logger = logger;
 
             _authCookieCache = cacheManager.GetCache<Dictionary<string, string>>(GetType(), "authCookies");
+            _apiVersionCache = cacheManager.GetCache<int>(GetType(), "apiVersion");
         }
 
         public int GetVersion(QBittorrentSettings settings)
@@ -44,7 +46,16 @@ namespace NzbDrone.Core.Download.Clients.QBittorrent
             var request = BuildRequest(settings).Resource("/version/api");
             var response = ProcessRequest<int>(request, settings);
 
+            _apiVersionCache.Set(settings.Host + ":" + settings.Port, response, TimeSpan.FromMinutes(5));
+
             return response;
+        }
+
+        private int GetCachedVersion(QBittorrentSettings settings)
+        {
+            var version = _apiVersionCache.Find(settings.Host + ":" + settings.Port);
+
+            return version == 0 ? GetVersion(settings) : version;
         }
 
         public Dictionary<string, object> GetConfig(QBittorrentSettings settings)
